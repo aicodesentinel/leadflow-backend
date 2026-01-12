@@ -84,3 +84,26 @@ app.use((req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+app.post("/api/leads", async (req, res) => {
+  try {
+    const { name, phone, message } = req.body || {};
+
+    if (!name || !phone || !message) {
+      return res.status(400).json({
+        ok: false,
+        error: "Missing fields: name, phone, message",
+      });
+    }
+
+    await appendLeadToSheet({ name, phone, message });
+
+    return res.json({ ok: true, saved: true });
+  } catch (err) {
+    console.error("LEAD ERROR:", err);
+    return res.status(500).json({
+      ok: false,
+      error: "Failed to save lead",
+      detail: err.message,
+    });
+  }
+});
