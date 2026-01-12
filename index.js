@@ -22,7 +22,7 @@ app.use(express.json({ limit: "1mb" }));
  * - ALLOWED_ORIGINS (lista separada por comas)
  */
 const SHEET_ID = process.env.SHEET_ID;
-const SHEET_NAME = process.env.SHEET_NAME || "Leads";
+const SHEET_NAME = process.env.SHEET_NAME || "leadflow";
 const SA_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
 const PRIVATE_KEY_RAW = process.env.GOOGLE_PRIVATE_KEY;
 
