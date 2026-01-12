@@ -4,64 +4,64 @@ const { google } = require("googleapis");
 
 const app = express();
 
-// =====================
-// CONFIG GENERAL
-// =====================
-app.use(cors());
+/**
+ * ✅ CORS:
+ * Si quieres hacerlo más estricto luego, aquí puedes limitar orígenes.
+ */
+app.use(cors({ origin: true }));
 app.use(express.json({ limit: "1mb" }));
 
-const PORT = process.env.PORT || 10000;
+/**
+ * ✅ ENV obligatorias (Render):
+ * - SHEET_ID
+ * - GOOGLE_SERVICE_ACCOUNT_EMAIL
+ * - GOOGLE_PRIVATE_KEY
+ *
+ * Opcionales:
+ * - SHEET_NAME (default: "Leads")
+ * - ALLOWED_ORIGINS (lista separada por comas)
+ */
+const SHEET_ID = process.env.SHEET_ID;
+const SHEET_NAME = process.env.SHEET_NAME || "Leads";
+const SA_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+const PRIVATE_KEY_RAW = process.env.GOOGLE_PRIVATE_KEY;
 
-// =====================
-// GOOGLE SHEETS (SERVICE ACCOUNT)
-// =====================
-function getAuth() {
-  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-  let key = process.env.GOOGLE_PRIVATE_KEY;
+function assertEnv() {
+  const missing = [];
+  if (!SHEET_ID) missing.push("SHEET_ID");
+  if (!SA_EMAIL) missing.push("GOOGLE_SERVICE_ACCOUNT_EMAIL");
+  if (!PRIVATE_KEY_RAW) missing.push("GOOGLE_PRIVATE_KEY");
+  return missing;
+}
 
-  // Render suele guardar los saltos como \n (texto); hay que convertirlos a saltos reales
-  if (key) key = key.replace(/\\n/g, "\n");
+/**
+ * ✅ Render guarda la llave como texto.
+ * A veces viene con \n literales. Esto lo repara.
+ */
+function normalizePrivateKey(key) {
+  return key.replace(/\\n/g, "\n");
+}
 
-  if (!email || !key) {
-    throw new Error("Faltan env vars: GOOGLE_SERVICE_ACCOUNT_EMAIL o GOOGLE_PRIVATE_KEY");
+async function getSheetsClient() {
+  const missing = assertEnv();
+  if (missing.length) {
+    throw new Error(`Missing env vars: ${missing.join(", ")}`);
   }
 
-  return new google.auth.JWT({
-    email,
-    key,
+  const auth = new google.auth.JWT({
+    email: SA_EMAIL,
+    key: normalizePrivateKey(PRIVATE_KEY_RAW),
     scopes: ["https://www.googleapis.com/auth/spreadsheets"]
   });
+
+  await auth.authorize();
+
+  return google.sheets({ version: "v4", auth });
 }
 
-async function appendLead({ name, phone, message, source = "web" }) {
-  const spreadsheetId = process.env.GOOGLE_SHEETS_ID;
-  const sheetTab = process.env.GOOGLE_SHEETS_TAB || "Leads";
-
-  if (!spreadsheetId) throw new Error("Falta env var: GOOGLE_SHEETS_ID");
-
-  const auth = getAuth();
-  const sheets = google.sheets({ version: "v4", auth });
-
-  const now = new Date().toISOString();
-
-  // Columnas: fecha | nombre | telefono | mensaje | fuente
-  await sheets.spreadsheets.values.append({
-    spreadsheetId,
-    range: `${sheetTab}!A:E`,
-    valueInputOption: "USER_ENTERED",
-    requestBody: {
-      values: [[now, name, phone, message, source]]
-    }
-  });
-}
-
-// =====================
-// RUTAS BASE (para que NO salga Not Found)
-// =====================
-app.get("/", (req, res) => {
-  res.status(200).send("✅ leadflow-backend online. Try /health or /api");
-});
-
+/**
+ * ✅ Salud
+ */
 app.get("/health", (req, res) => {
   res.json({ ok: true, status: "healthy" });
 });
@@ -69,55 +69,95 @@ app.get("/health", (req, res) => {
 app.get("/api", (req, res) => {
   res.json({
     message: "API running",
-    endpoints: {
-      GET: ["/", "/health", "/api"],
-      POST: ["/api/leads"]
-    }
+    endpoints: ["/", "/health", "/api", "/api/leads (POST)"]
   });
 });
 
-// =====================
-// ENDPOINT PRINCIPAL: LEADS
-// =====================
+app.get("/", (req, res) => {
+  res.status(200).send("✅ leadflow-backend online. Try /health or /api");
+});
+
+/**
+ * ✅ Helper: validación básica
+ */
+function clean(str) {
+  if (str === undefined || str === null) return "";
+  return String(str).trim();
+}
+
+function nowISO() {
+  return new Date().toISOString();
+}
+
+/**
+ * ✅ POST /api/leads
+ * Body esperado (JSON):
+ * {
+ *   "name": "Eduardo",
+ *   "whatsapp": "526568239431",
+ *   "email": "x@x.com",
+ *   "source": "landing/ig/tiktok",
+ *   "message": "Quiero..."
+ * }
+ */
 app.post("/api/leads", async (req, res) => {
   try {
-    const { name, phone, message, source } = req.body || {};
+    const name = clean(req.body?.name);
+    const whatsapp = clean(req.body?.whatsapp);
+    const email = clean(req.body?.email);
+    const source = clean(req.body?.source);
+    const message = clean(req.body?.message);
 
-    // Validación mínima (evita basura)
-    if (!name || !phone || !message) {
-      return res.status(400).json({
-        ok: false,
-        error: "Faltan campos: name, phone, message"
-      });
+    // Validación mínima (ajustable)
+    if (!name) {
+      return res.status(400).json({ ok: false, error: "Falta name" });
+    }
+    if (!whatsapp) {
+      return res.status(400).json({ ok: false, error: "Falta whatsapp" });
+    }
+    if (!message) {
+      return res.status(400).json({ ok: false, error: "Falta message" });
     }
 
-    // Limpieza simple
-    const safeName = String(name).trim().slice(0, 80);
-    const safePhone = String(phone).trim().slice(0, 30);
-    const safeMessage = String(message).trim().slice(0, 1000);
-    const safeSource = source ? String(source).trim().slice(0, 50) : "web";
+    const sheets = await getSheetsClient();
 
-    await appendLead({
-      name: safeName,
-      phone: safePhone,
-      message: safeMessage,
-      source: safeSource
+    // ✅ Asegúrate de que la hoja existe: SHEET_NAME (default "Leads")
+    // Guardamos columnas: timestamp, name, whatsapp, email, source, message, userAgent, ip
+    const row = [
+      nowISO(),
+      name,
+      whatsapp,
+      email,
+      source,
+      message,
+      clean(req.headers["user-agent"]),
+      clean(req.headers["x-forwarded-for"] || req.socket?.remoteAddress)
+    ];
+
+    const range = `${SHEET_NAME}!A:H`;
+
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SHEET_ID,
+      range,
+      valueInputOption: "USER_ENTERED",
+      insertDataOption: "INSERT_ROWS",
+      requestBody: {
+        values: [row]
+      }
     });
 
     return res.json({ ok: true, saved: true });
   } catch (err) {
-    console.error("ERROR /api/leads:", err);
+    const msg = err?.message || "Unknown error";
     return res.status(500).json({
       ok: false,
-      error: "No se pudo guardar el lead",
-      detail: err.message
+      error: "No se pudo guardar en Google Sheets",
+      detail: msg
     });
   }
 });
 
-// =====================
-// START
-// =====================
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
+  console.log(`✅ Server listening on port ${PORT}`);
 });
