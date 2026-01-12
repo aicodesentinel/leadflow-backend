@@ -1,11 +1,14 @@
 {
   "name": "leadflow-backend",
-  "version": "1.1.0",
-  "description": "LeadFlow Backend (Express + Google Sheets)",
+  "version": "1.0.0",
+  "description": "LeadFlow backend (Render) -> Google Sheets",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
     "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "dependencies": {
     "cors": "^2.8.5",
