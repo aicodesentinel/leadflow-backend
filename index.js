@@ -1,5 +1,52 @@
 const express = require("express");
 const cors = require("cors");
+// =========================
+// LEADS -> GOOGLE SHEETS
+// =========================
+const { google } = require("googleapis");
+
+// Render env vars:
+// GOOGLE_SHEETS_ID
+// GOOGLE_SERVICE_ACCOUNT_EMAIL
+// GOOGLE_PRIVATE_KEY
+
+function getGoogleAuthClient() {
+  const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  let privateKey = process.env.GOOGLE_PRIVATE_KEY;
+
+  // Render guarda saltos de línea como \n, hay que convertirlos
+  if (privateKey) privateKey = privateKey.replace(/\\n/g, "\n");
+
+  if (!clientEmail || !privateKey) {
+    throw new Error("Missing Google service account env vars.");
+  }
+
+  return new google.auth.JWT({
+    email: clientEmail,
+    key: privateKey,
+    scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+  });
+}
+
+async function appendLeadToSheet({ name, phone, message }) {
+  const spreadsheetId = process.env.GOOGLE_SHEETS_ID;
+  if (!spreadsheetId) throw new Error("Missing GOOGLE_SHEETS_ID env var.");
+
+  const auth = getGoogleAuthClient();
+  const sheets = google.sheets({ version: "v4", auth });
+
+  const now = new Date().toISOString();
+
+  // Hoja y rango: "Leads!A:D"
+  await sheets.spreadsheets.values.append({
+    spreadsheetId,
+    range: "Leads!A:D",
+    valueInputOption: "USER_ENTERED",
+    requestBody: {
+      values: [[now, name || "", phone || "", message || ""]],
+    },
+  });
+}
 
 const app = express();
 
